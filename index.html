@@ -584,6 +584,14 @@ img{max-width:100%}
   <div class="card">
     <p class="h2">Opdrachten</p>
     <p class="note" id="curInfo" style="margin-bottom:10px"></p>
+    <div class="field" style="margin-bottom:10px"><span class="lbl">Offertenummer</span><input id="oNr" autocomplete="off" spellcheck="false"></div>
+    <details style="margin-bottom:10px"><summary>Nummering instellen</summary>
+      <div class="row">
+        <div class="field"><span class="lbl">Begin van nummer</span><input id="nrPre" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><span class="lbl">Volgend nummer</span><input id="nrNext" type="number" min="1"></div>
+      </div>
+      <p class="note" style="margin-top:6px">{jaar} wordt automatisch het jaartal. Voorbeeld: <b id="nrEx"></b></p>
+    </details>
     <div class="acts">
       <button class="btn" type="button" id="oSave">Opslaan</button>
       <button class="btn ghost" type="button" id="oNew">Nieuwe opdracht</button>
@@ -1076,9 +1084,11 @@ function calc(){
 
 /* tekst + pdf */
 let CUR=store.get("cse_cur",null);
-const nr=()=>CUR&&CUR.nr?CUR.nr:nextNr();
+const nr=()=>CUR&&CUR.nr?CUR.nr:(NRCUSTOM||nextNr());
 const nrKey=()=>"cse_nr_"+new Date().getFullYear();
-const nrFmt=n=>"CSE-"+new Date().getFullYear()+"-"+String(n).padStart(3,"0");
+const nrPre=()=>store.get("cse_nr_pre","CSE-{jaar}-");
+const nrFmt=n=>nrPre().replace(/\{jaar\}/gi,new Date().getFullYear())+String(n).padStart(3,"0");
+var NRCUSTOM=null;
 const nextNr=()=>nrFmt(store.get(nrKey(),0)+1);
 const nrNew=()=>{const n=store.get(nrKey(),0)+1;store.set(nrKey(),n);return nrFmt(n)};
 const dNL=v=>v?new Date(v+"T12:00").toLocaleDateString("nl-NL",{day:"numeric",month:"long",year:"numeric"}):"";
@@ -1176,7 +1186,7 @@ async function makePdf(){
   const pages=d.getNumberOfPages();
   for(let pg=1;pg<=pages;pg++){d.setPage(pg);d.setFontSize(8);d.setTextColor(...mut);d.text("Geldig 14 dagen. Stroomvoorziening en vrije opbouwruimte op locatie door opdrachtgever.",15,289);d.text(pg+"/"+pages,195,289,{align:"right"})}
   const naam=($("kNaam").value||$("kBedrijf").value||"klant").replace(/[^\w\- ]+/g,"").trim().replace(/\s+/g,"-");
-  return {blob:d.output("blob"),name:`Offerte-LED-wall-${naam}-${num}.pdf`,doc:d};
+  return {blob:d.output("blob"),name:`Offerte-LED-wall-${naam}-${num.replace(/[\/\\:*?"<>|]/g,"-")}.pdf`,doc:d};
 }
 const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
 let lastUrl=null;
@@ -1236,7 +1246,7 @@ function jobFrom(id,nrv){return {act,id,nr:nrv,saved:new Date().toISOString(),wa
 function saveJob(asCopy){
   const exists=CUR&&JOBS.find(j=>j.id===CUR.id);
   if(exists&&!asCopy){const j=jobFrom(CUR.id,CUR.nr);JOBS[JOBS.indexOf(exists)]=j;toast("Opdracht "+j.nr+" bijgewerkt")}
-  else{const j=jobFrom("j"+Date.now(),nrNew());JOBS.unshift(j);CUR={id:j.id,nr:j.nr};toast(asCopy?"Kopie opgeslagen als "+j.nr:"Opgeslagen als "+j.nr)}
+  else{const j=jobFrom("j"+Date.now(),(!asCopy&&NRCUSTOM)?NRCUSTOM:nrNew());NRCUSTOM=null;JOBS.unshift(j);CUR={id:j.id,nr:j.nr};toast(asCopy?"Kopie opgeslagen als "+j.nr:"Opgeslagen als "+j.nr)}
   saveJobs();calc();
 }
 function openJob(id){
@@ -1247,16 +1257,16 @@ function openJob(id){
   window.scrollTo({top:0,behavior:"smooth"});
 }
 function newJob(){
-  walls=[newWall(1)];act=0;saveWalls();KF.forEach(k=>$(k).value="");saveForm();CUR=null;saveJobs();loadWall();renderPanels();calc();toast("Nieuwe opdracht gestart");
+  NRCUSTOM=null;walls=[newWall(1)];act=0;saveWalls();KF.forEach(k=>$(k).value="");saveForm();CUR=null;saveJobs();loadWall();renderPanels();calc();toast("Nieuwe opdracht gestart");
 }
 let delId=null,delT=0,guardT=0;
 function isDirty(){
-  if(!CUR)return walls.length>1||KF.some(k=>$(k).value)||walls[0].mask&&walls[0].mask.length>0;
+  if(!CUR)return !!NRCUSTOM||walls.length>1||KF.some(k=>$(k).value)||walls[0].mask&&walls[0].mask.length>0;
   const j=JOBS.find(x=>x.id===CUR.id);if(!j)return true;
-  return JSON.stringify(j.walls)!==JSON.stringify(walls)||JSON.stringify(j.form)!==JSON.stringify(snapshot());
+  return j.nr!==CUR.nr||JSON.stringify(j.walls)!==JSON.stringify(walls)||JSON.stringify(j.form)!==JSON.stringify(snapshot());
 }
 function guard(fn){if(isDirty()&&Date.now()-guardT>3000){guardT=Date.now();toast("Let op: niet opgeslagen wijzigingen! Tik nogmaals om toch door te gaan, of tik eerst op Opslaan.");return}guardT=0;fn()}
-function updDirty(){const d=isDirty();if(!CUR){$("oSave").textContent="Opslaan";$("oSave").classList.remove("ghost");$("curInfo").textContent="Nieuwe opdracht, nog niet opgeslagen.";return}$("oSave").textContent=d?"Opslaan ●":"Opgeslagen ✓";$("oSave").classList.toggle("ghost",!d);
+function updDirty(){if(document.activeElement!==$("oNr"))$("oNr").value=nr();if(window.nrSettingsUI&&![$("nrPre"),$("nrNext")].includes(document.activeElement))nrSettingsUI();const d=isDirty();if(!CUR){$("oSave").textContent="Opslaan";$("oSave").classList.remove("ghost");$("curInfo").textContent="Nieuwe opdracht, nog niet opgeslagen.";return}$("oSave").textContent=d?"Opslaan ●":"Opgeslagen ✓";$("oSave").classList.toggle("ghost",!d);
   $("curInfo").textContent=(CUR?"Open: "+CUR.nr+". ":"Nieuwe opdracht. ")+(d?"Er zijn wijzigingen die nog niet zijn opgeslagen.":"Alles is opgeslagen.");}
 function renderJobs(){
   $("oList").textContent="Opgeslagen ("+JOBS.length+")";
@@ -1458,7 +1468,7 @@ async function makeCrewPdf(){
   const pages=d.getNumberOfPages();
   for(let pg=1;pg<=pages;pg++){d.setPage(pg);d.setFontSize(8);d.setTextColor(...mut);d.text("Crystal Screen Events · 06 31 33 31 19 · intern document, geen prijzen",15,289);d.text(pg+"/"+pages,195,289,{align:"right"})}
   const naam=($("kNaam").value||$("kBedrijf").value||"opdracht").replace(/[^\w\- ]+/g,"").trim().replace(/\s+/g,"-");
-  return {blob:d.output("blob"),name:`Opbouw-paklijst-${naam}-${num}.pdf`,doc:d};
+  return {blob:d.output("blob"),name:`Opbouw-paklijst-${naam}-${num.replace(/[\/\\:*?"<>|]/g,"-")}.pdf`,doc:d};
 }
 $("crewPdf").onclick=async()=>{const r=await makeCrewPdf();if(r)await savePdf(r)};
 $("crewWa").onclick=()=>window.open("https://wa.me/?text="+encodeURIComponent("Opbouw "+nr()+" "+($("kLoc").value||"")+"\n"+kitText()),"_blank");
@@ -1643,6 +1653,18 @@ function renderAV(R){
 
 ["avEnv","sndType","litType"].forEach(k=>$(k).addEventListener("change",()=>{saveForm();calc()}));
 window.AVREADY=true;calc();
+/* offertenummer wijzigen */
+function nrSettingsUI(){$("nrPre").value=nrPre();$("nrNext").value=store.get(nrKey(),0)+1;$("nrEx").textContent=nextNr()}
+$("oNr").addEventListener("change",()=>{
+  const v=$("oNr").value.trim();if(!v){$("oNr").value=nr();return}
+  const dup=JOBS.find(j=>j.nr===v&&(!CUR||j.id!==CUR.id));
+  if(CUR){CUR.nr=v;store.set("cse_cur",CUR)}else NRCUSTOM=v===nextNr()?null:v;
+  calc();toast((dup?"Let op: "+v+" is al gebruikt bij "+dup.klant+". ":"Offertenummer: "+v+". ")+"Tik Opslaan om te bewaren.");
+});
+$("nrPre").addEventListener("change",()=>{store.set("cse_nr_pre",$("nrPre").value||"CSE-{jaar}-");nrSettingsUI();calc();toast("Nummering aangepast")});
+$("nrNext").addEventListener("change",()=>{const n=Math.max(1,parseInt($("nrNext").value)||1);store.set(nrKey(),n-1);nrSettingsUI();calc();toast("Volgend nummer: "+nextNr())});
+nrSettingsUI();calc();
+
 
 
 /* pagina's */
